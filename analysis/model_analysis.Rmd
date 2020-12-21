@@ -1,0 +1,256 @@
+---
+title: "Model-based analyses"
+output: html_notebook
+---
+
+In this notebook, we make plots and analyze the outputs of our simulations.
+
+# Imports 
+
+```{r}
+library(jsonlite)
+library(tidyverse)
+library(ggthemes)
+library(lme4)
+library(lmerTest)
+library(tidyboot)
+```
+# Resource-rational simulations (Section 2)
+
+```{r}
+RR <- read_csv('../modeling/output/fine_RRlistenerOutput.csv') %>%
+  mutate(src = 'listener') %>%
+  bind_rows(read_csv('../modeling/output/fine_RRspeakerOutput.csv') %>% 
+              mutate(src ='speaker')) %>%
+  group_by(src, perspectiveCost, alpha, uttCost) %>%
+  mutate(maxProb = prob == max(prob)) %>%
+  filter(round(perspectiveCost,2) %in% c(0, .05, 0.1, 0.15, 0.2, 0.25, 
+                                         0.3, 0.35, 0.4, 0.45, 0.5))
+
+RR %>%
+  ggplot(aes(x = weighting, y = prob, 
+             color = perspectiveCost, group = perspectiveCost)) +
+  geom_line(alpha = 0.75) +
+  geom_point(aes(x = weighting, y = prob, color = perspectiveCost), 
+             data = subset(RR %>% filter(maxProb))) +
+  facet_grid(~ src) +
+  theme_few() +
+  xlim(0,1) +
+  theme(aspect.ratio = 1) +
+  theme(legend.position="top")
+
+ggsave('simulations.pdf')
+```
+
+
+```{r}
+RR %>%
+  filter(perspectiveCost == 0.2) %>%
+  filter(maxProb)
+```
+
+### Dynamics simulations
+
+```{r}
+dynamics <- read_csv('../modeling/output/dynamicsOutput.csv')
+
+dynamics %>%
+  group_by(numDatapoints) %>%
+  filter(prob == max(prob)) %>%
+  ggplot(aes(x = numDatapoints, y = weighting)) +
+    geom_line() +
+    theme_few() +
+    xlim(0, 30) +
+    ylim(.5, 1) +
+    labs(x = 'length of interaction', y = 'optimal weighting') +
+    theme(aspect.ratio = 1) 
+
+ggsave('../../pragmatics_and_perspective_taking_tex/cognitive_science_revision/figures/dynamics.pdf', width = 2, height = 2,
+       units = 'in')
+```
+
+### Model comparison
+
+Look at pattern of predictives for each model, compared to empirical number of features mentioned
+```{r}
+dodge <- position_dodge(width=0.9)
+
+rbind(
+    read.csv('../modeling/bdaOutput/occlusionSensitivityPredictives.csv') %>% mutate(source = 'occlusion-sensitive model'),
+    read.csv('../modeling/bdaOutput/egocentricPredictives.csv') %>% mutate(source = 'occlusion-blind model')
+    ) %>%
+  mutate(i = row_number()) %>%
+  gather(condition, value, -prob, -MCMCprob, -source, -i) %>%
+  separate(condition, sep = '_', into = c('context', 'numDistractors', 'distractorType', 'hidden')) %>%
+  #filter(context == 'far' & source == 'occlusion-blind model' & hidden == 'visible') %>%
+  group_by(context, hidden, source) %>%
+  summarize(mean = mean(value),
+            ci_lower = round(HPDlo(value), 3),
+            ci_upper = round(HPDhi(value), 3)) %>%
+  #separate(condition, into = c('context', 'hidden')) %>%
+  ungroup() %>%
+  mutate(hidden = ifelse(hidden == 'hidden', 'yes', 'no')) %>%
+  rbind(d %>% 
+          group_by(context, hidden) %>% 
+          tidyboot_mean(column = numFeatures) %>%
+          ungroup() %>%
+          mutate(context = as.character(context)) %>%
+          mutate(source = as.character('empirical data')) %>% 
+          select(-empirical_stat, -n)) %>%
+  mutate(source = factor(source, levels = c('empirical data', 'occlusion-sensitive model', 
+                                            'occlusion-blind model'))) %>%
+  ggplot(aes(x = context, fill = hidden, y = mean)) +
+    geom_bar(stat = 'identity', position = dodge) +
+    geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower), position = dodge, width = 0) +
+    facet_wrap(~ source) +
+    theme_few() +
+    ylim(0,3) +
+    theme(aspect.ratio = .57, text = element_text(size=20)) +
+    ylab('mean # features produced') 
+
+ggsave('../../pragmatics_and_perspective_taking_tex/cognition_format/figures/predictives.pdf',
+       useDingbats=FALSE )
+```
+
+```{r}
+to.plot <- rbind(read.csv('../modeling/bdaOutput/occlusionSensitivityPredictives.csv') %>% mutate(source = 'occlusion-sensitive model'),
+     read.csv('../modeling/bdaOutput/egocentricPredictives.csv') %>% mutate(source = 'occlusion-blind model')
+     ) %>%
+  mutate(i = row_number()) %>%
+  gather(condition, value, -prob, -MCMCprob, -source, -i) %>%
+  group_by(condition, source) %>%
+  summarize(mean = mean(value),
+            ci_lower = round(HPDlo(value), 3),
+            ci_upper = round(HPDhi(value), 3)) %>%
+  separate(condition, sep = '_', into = c('context', 'numDistractors', 'distractorType', 'hidden')) %>%
+  mutate(hidden = ifelse(hidden == 'hidden', 'yes', 'no')) %>%
+  rbind(read_csv('../modeling/bdaInput/bdaInput.csv') %>% 
+          mutate(numFeatures = color + shape + texture) %>%
+          group_by(context, distractorType, numDistractors, hidden) %>% 
+          tidyboot_mean(column = numFeatures) %>%
+          ungroup() %>%
+          mutate(numDistractors = numDistractors - 2) %>%
+          mutate(context = as.character(context)) %>%
+          mutate(distractorType = gsub("_", "", distractorType)) %>%
+          mutate(source = as.character('empirical data')) %>% 
+          ungroup() %>%
+          select(-empirical_stat, -n)) %>%
+  mutate(source = factor(source, levels = c('empirical data', 'occlusion-sensitive model', 
+                                            'occlusion-blind model'))) %>%
+  unite(col = asdf, mean, ci_lower, ci_upper) %>%
+  spread(source, asdf) %>%
+  separate(`empirical data`, sep = '_', into = c('emp_mean', 'emp_lower', 'emp_upper'))%>%
+  separate(`occlusion-sensitive model`, sep = '_', into = c('occ_mean', 'occ_lower', 'occ_upper')) %>%
+  separate(`occlusion-blind model`, sep = '_', into = c('ego_mean', 'ego_lower', 'ego_upper')) %>%
+  mutate(emp_mean = as.numeric(emp_mean), emp_lower = as.numeric(emp_lower), emp_upper = as.numeric(emp_upper),
+         occ_mean = as.numeric(occ_mean), occ_lower = as.numeric(occ_lower), occ_upper = as.numeric(occ_upper),
+         ego_mean = as.numeric(ego_mean), ego_lower = as.numeric(ego_lower), ego_upper = as.numeric(ego_upper)) 
+
+ggplot(to.plot, aes(x = occ_mean, y = emp_mean)) +
+  geom_point() +#(stat = 'identity', position = dodge) +
+  geom_errorbar(aes(ymin = emp_lower, ymax = emp_upper), width = 0) +
+  #geom_errorbarh(aes(xmin = occ_lower, xmax = occ_upper), width = 0) +
+  geom_smooth(method = 'lm') +
+  theme_few() +
+  theme(aspect.ratio = 1, text = element_text(size=20)) +
+  xlab('predicted # features')+
+  ylab('empirical # features') 
+
+ggsave('../../pragmatics_of_perspective_taking_tex/cognition_format/figures/predictiveScatter.pdf',
+       useDingbats=FALSE )
+```
+
+```{r}
+ggplot(to.plot, aes(x = ego_mean, y = emp_mean)) +
+  geom_point() +#(stat = 'identity', position = dodge) +
+  geom_errorbar(aes(ymin = emp_lower, ymax = emp_upper), width = 0) +
+  #geom_errorbarh(aes(xmin = ego_lower, xmax = ego_upper), width = 0) +
+  geom_smooth(method = 'lm') +
+  theme_few() +
+  theme(aspect.ratio = 1, text = element_text(size=20)) +
+  xlab('predicted # features')+
+  ylab('empirical # features') 
+ggsave('../../pragmatics_of_perspective_taking_tex/cognition_format/figures/egocentricScatter.pdf',
+       useDingbats=FALSE)
+       #height = 5, width = 9)
+```
+
+Get MAP estimates and CIs from param posteriors for occlusion-sensitive model
+
+```{r}
+params <- read.csv('../modeling/bdaOutput/occlusionSensitivityParams.csv') 
+
+params %>%
+  gather(parameter, value, alpha:shapeCost) %>%
+  group_by(parameter) %>%
+  summarize(mode = estimate_mode(value),
+            md_lo = HPDlo(value),
+            md_hi = HPDhi(value))
+```
+
+Visualize param posteriors
+
+```{r}
+numSamples = 5000
+params.samples <- params[rep(row.names(params), exp(params$prob)*numSamples), ] %>%
+    gather(parameter, value, alpha:shapeCost)
+
+answererParamPosteriors = ggplot(params.samples, aes(x=log(value)))+
+    geom_density(aes(y=..density..),
+                 data =subset(params.samples, parameter == "alpha" ),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "textureCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "colorCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "shapeCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    xlab('log parameter value')+
+    ggtitle("Parameter Posteriors (5000 samples)") +
+    facet_grid(parameter ~ . , scales = 'free') +
+    theme_few()
+
+answererParamPosteriors
+ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/paramPosterior.pdf',
+       height = 4, width = 6)
+```
+
+log-likelihood plot
+
+```{r}
+rbind(read.csv('../modeling/bdaOutput/occlusionSensitivityParams.csv'),
+      read.csv('../modeling/bdaOutput/egocentricParams.csv')) %>%
+  group_by(source) %>%
+  summarize(maxLikelihood = max(logLikelihood)) %>%
+  ggplot(aes(x = source, y = maxLikelihood)) +
+    geom_bar(stat = 'identity') +
+    theme_few() +
+    coord_cartesian(ylim=c(0, -4000)) +
+    theme(aspect.ratio = 3)
+
+ggsave("../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/likelihoodPlot.pdf",
+       height = 6, width = 2)
+```
+
+
+Look at big grid of 
+
+```{r}
+bind_rows(
+  read_csv('../modeling/output/new_RRlistenerOutput.csv') %>% mutate(src = 'listener'),
+  read_csv('../modeling/output/new_RRspeakerOutput.csv') %>% mutate(src ='speaker')
+) %>%
+  filter(perspectiveCost < 0.55) %>%
+  filter(alpha == 2.12) %>%
+  group_by(src, perspectiveCost, alpha, uttCost) %>%
+  ggplot(aes(x = weighting, y = prob, 
+             color = perspectiveCost, group = perspectiveCost)) +
+  geom_line() +
+  facet_grid(uttCost ~ src) +
+  theme_few() +
+  xlim(0,1) +
+  theme(aspect.ratio = 1)
+```
