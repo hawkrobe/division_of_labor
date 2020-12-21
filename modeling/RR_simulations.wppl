@@ -33,7 +33,7 @@ var possibleUtterances = Categorical({
 // these are the possible mixture weights for perspective-taking
 // where 0 is purely egocentric and 1 is purely partner's perspective
 var possibleWeightings = Categorical({
-  vs: _.range(0, 1, 0.05)
+  vs: _.range(0, 1, 0.01)
 });
 
 // these are the possible conditions of visible objects presented to the speaker
@@ -45,10 +45,10 @@ var contexts = {
 // <feature>Cost: cost associated with producing this feature
 // perspectiveCost: cost associated with perspective-taking
 var params = {
-  alpha: 5,
-  textureCost : 0.01,
-  shapeCost : 0.01,
-  colorCost : 0.01,
+  alpha: argv.alpha,
+  textureCost : argv.uttCost,
+  shapeCost : argv.uttCost,
+  colorCost : argv.uttCost,
   perspectiveCost : argv.perspectiveCost
 };
 
@@ -91,7 +91,7 @@ var L0 = cache(function(utt, context, weighting) {
     var perspective = flip(weighting) ? 'other' : 'own';
     var partnerContext = perspective == 'own' ? context : getSpeakerView(context);
     var object = uniformDraw(partnerContext);
-    factor(meaning(utt, object) ? 0 : -100);
+    factor(meaning(utt, object) ? Math.log(1) : Math.log(0.01));
     return object;
   });
 });
@@ -147,7 +147,8 @@ var RR_speaker = function(target, context) {
 
     // putting more weight on partner's perspective is costly
     factor(utility - ownWeighting * params.perspectiveCost);
-    return {weighting: ownWeighting, perspectiveCost: params.perspectiveCost};
+    return {weighting: ownWeighting, perspectiveCost: params.perspectiveCost,
+            alpha: params.alpha, uttCost: argv.uttCost};
   });
 }
 
@@ -160,7 +161,7 @@ var RR_listener = function(utt, baseContext) {
     // Marginalize over partner's mixture weight and possible hidden objects
     var utility = expectation(possibleObjects, function(hiddenObj) {
       return expectation(possibleWeightings, function(partnerWeighting) {
-        var context = baseContext.concat(hiddenObj + '_private').concat(hiddenObj + '_private');
+        var context = baseContext.concat(hiddenObj + '_private');
         var realSpeakerView = getSpeakerView(context);
         var likelyUtt = MAP(S1('texture_color_shape', realSpeakerView, partnerWeighting))['val'];
         return L1(likelyUtt, context, ownWeighting).score('texture_color_shape');
@@ -169,7 +170,8 @@ var RR_listener = function(utt, baseContext) {
 
     // putting more weight on partner's perspective is costly
     factor(utility - ownWeighting * params.perspectiveCost);
-    return {weighting: ownWeighting, perspectiveCost: params.perspectiveCost};
+    return {weighting: ownWeighting, perspectiveCost: params.perspectiveCost,
+            alpha: params.alpha, uttCost: argv.uttCost};
   });
 };
 
