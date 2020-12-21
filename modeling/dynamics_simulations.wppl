@@ -1,5 +1,3 @@
-// webppl experimental.wppl
-
 // the stimulus set in this world varies along 3 dimensions. because
 // the precise levels (e.g. 'blue', 'red') don't matter, we always
 // take the target to be 'texture_color_shape' (i.e. some set of
@@ -49,11 +47,11 @@ var contexts = {
 // <feature>Cost: cost associated with producing this feature
 // perspectiveCost: cost associated with perspective-taking
 var params = {
-  alpha: 5,
-  textureCost : 0.01,
-  shapeCost : 0.01,
-  colorCost : 0.01,
-  perspectiveCost : 0.1
+  alpha: 2,
+  textureCost : 0.03,
+  shapeCost : 0.03,
+  colorCost : 0.03,
+  perspectiveCost : 0.2
 };
 
 var getTrueUtterances = function(context) {
@@ -95,7 +93,7 @@ var L0 = cache(function(utt, context, weighting) {
     var perspective = flip(weighting) ? 'other' : 'own';
     var partnerContext = perspective == 'own' ? context : getSpeakerView(context);
     var object = uniformDraw(partnerContext);
-    condition(meaning(utt, object));
+    factor(meaning(utt, object) ? Math.log(1) : Math.log(0.01));
     return object;
   });
 });
@@ -105,20 +103,15 @@ var L0 = cache(function(utt, context, weighting) {
 var S1 = cache(function(target, context, ownWeighting) {
   return Infer({method: 'enumerate'}, function() {
     var utt = sample(getTrueUtterances(context));    
-    var partnerWeighting = sample(possibleWeightings);
-
-    // Weight proportional to utility
-    var perspective = flip(ownWeighting) ? 'other' : 'own';
-    
-    var informativity = (
-      perspective == 'own' ? L0(utt, context, 0).score(target) :
-        expectation(possibleObjects, function(obj) {
-          var possibleListenerView = context.concat(obj + '_private');
-          return (L0(utt, possibleListenerView, partnerWeighting).score(target));
-        })
-    );
-
-    factor(params.alpha * (informativity - uttCost(utt,params)));
+    var combinedUtility = expectation(possibleWeightings, function(partnerWeighting) {
+      var egocentricUtility = L0(utt, context, 0).score(target) - uttCost(utt,params);
+      var asymmetricUtility = expectation(possibleObjects, function(obj) {
+        var possibleListenerView = context.concat(obj + '_private');
+        return L0(utt, possibleListenerView, partnerWeighting).score(target) - uttCost(utt,params);
+      });
+      return ownWeighting * asymmetricUtility + (1 - ownWeighting) * egocentricUtility;
+    });
+    factor(params.alpha * combinedUtility);
     return utt;
   });
 });
