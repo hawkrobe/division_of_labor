@@ -17,15 +17,17 @@ library(tidyboot)
 ```
 # Resource-rational simulations (Section 2)
 
+Make Fig. 2
+
 ```{r}
+costs <- c(0, .05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 RR <- read_csv('../modeling/output/fine_RRlistenerOutput.csv') %>%
   mutate(src = 'listener') %>%
   bind_rows(read_csv('../modeling/output/fine_RRspeakerOutput.csv') %>% 
               mutate(src ='speaker')) %>%
   group_by(src, perspectiveCost, alpha, uttCost) %>%
   mutate(maxProb = prob == max(prob)) %>%
-  filter(round(perspectiveCost,2) %in% c(0, .05, 0.1, 0.15, 0.2, 0.25, 
-                                         0.3, 0.35, 0.4, 0.45, 0.5))
+  filter(round(perspectiveCost,2) %in% costs)
 
 RR %>%
   ggplot(aes(x = weighting, y = prob, 
@@ -41,37 +43,46 @@ RR %>%
 
 ggsave('simulations.pdf')
 ```
-
+Look at optimal weights for example cost value
 
 ```{r}
 RR %>%
   filter(perspectiveCost == 0.2) %>%
   filter(maxProb)
 ```
-
-### Dynamics simulations
+Look at change points (for Fig.2 caption)
 
 ```{r}
-dynamics <- read_csv('../modeling/output/dynamicsOutput.csv')
+RR %>%
+  filter(perspectiveCost == 0, src == 'speaker') %>%
+  mutate(changePoint = prob != lead(prob)) %>%
+  filter(changePoint)
+```
+
+### Dynamics simulations (Appendix B)
+
+```{r}
+dynamics <- read_csv('../modeling/output/new_dynamicsOutput.csv')
 
 dynamics %>%
   group_by(numDatapoints) %>%
   filter(prob == max(prob)) %>%
   ggplot(aes(x = numDatapoints, y = weighting)) +
     geom_line() +
+    geom_point() +
     theme_few() +
-    xlim(0, 30) +
-    ylim(.5, 1) +
+    xlim(0, 50) +
+    ylim(0, 1) +
     labs(x = 'length of interaction', y = 'optimal weighting') +
     theme(aspect.ratio = 1) 
 
-ggsave('../../pragmatics_and_perspective_taking_tex/cognitive_science_revision/figures/dynamics.pdf', width = 2, height = 2,
-       units = 'in')
+ggsave('dynamics.pdf', width = 2, height = 2, units = 'in')
 ```
 
 ### Model comparison
 
 Look at pattern of predictives for each model, compared to empirical number of features mentioned
+
 ```{r}
 dodge <- position_dodge(width=0.9)
 
