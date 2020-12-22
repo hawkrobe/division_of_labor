@@ -12,8 +12,6 @@ library(ggthemes)
 library(lme4)
 library(lmerTest)
 library(tidyboot)
-library(coda)
-#library(irr)
 ```
 
 # Experiment 1
@@ -58,8 +56,7 @@ d <- d_annotated %>%
 How many recruited, how many excluded, for what reasons, etc?
 
 ```{r}
-paste0('recruited ', length(exp1_subjInfo$gameid))
-paste0('total games ', length(unique(d_annotated$gameid)))
+paste0('total games recruited: ', length(unique(d_annotated$gameid)))
 paste0('incomplete ', length(incompleteIDs))
 paste0('confused ', length(setdiff(confused,incompleteIDs)))
 paste0('non-native english ', length(setdiff(nonNative, union(confused, incompleteIDs))))
@@ -71,41 +68,13 @@ paste0('final sample ', length(unique(d$gameid)))
 
 ```{r}
 exp1_clicks <- read_tsv('../data/experiment1/planned_sample/clickedObj/clickedObj.csv') %>%
-  mutate(correct = ifelse(correct == 'true', 1, 0)) %>%
   filter(!(gameid %in% badGames))
 ```
 
-### Write out for modeling & bayesian data analysis
-
-Add missing column annotating whether critical distractor in close trials different from target in texture, color, or both...
-
-```{r}
-bdaInput = exp1_clicks %>% 
-  mutate(names = substr(names,2,nchar(names)-1)) %>%
-  separate(names, sep = ',', into = c('item1','item2','item3', 'item4', 'item5'),
-           extra = "merge", fill = "left") %>%
-  select(-item5) %>%
-  gather(distractorNum, distractorName, item1:item4) %>%
-  separate(intendedName, into = c('targetTexture', 'targetColor', 'targetShape')) %>%
-  filter(!is.na(distractorName)) %>%
-  separate(distractorName, into = c('distractorTexture', 'distractorColor', 'distractorShape')) %>%
-  filter(distractorShape == targetShape) %>%
-  mutate(textureMatch = distractorTexture == targetTexture) %>%
-  mutate(colorMatch = distractorColor == targetColor) %>%
-  mutate(distractorType = ifelse(textureMatch, 'texture_shape', ifelse(colorMatch, 'color_shape', 'shape_only'))) %>%
-  select(gameid, trialNum, distractorType) %>%
-  right_join(exp1_clicks) %>%
-  mutate(distractorType = ifelse(is.na(distractorType), 'diff_shape', distractorType)) %>%
-  right_join(d) 
-
-write_csv(bdaInput %>% select(gameid, trialNum, distractorType, context, hidden, 
-                              numDistractors, colorMention, shapeMention, textureMention),
-  '../modeling/bdaInput/bdaInput.csv')
-```
 
 ## Speaker results
 
-### Visualize message length collapsing across all subjects
+### Visualize message length collapsing across all subjects (Fig. 4A)
 
 ```{r}
 dodge <- position_dodge(width=0.9)
@@ -131,11 +100,10 @@ ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/figures/num_words
 contrasts(d$context) <- contr.treatment(2, base = 2)
 contrasts(d$occlusions) <- contr.treatment(2, base = 2)
 
-summary(lmer(numRawWords ~ context * occlusions + (1 + context * occlusions | gameid), data = d ))
+summary(lmer(numRawWords ~ context * occlusions + (1 + context + occlusions | gameid), data = d ))
 ```
 
-
-### Use feature data instead
+### Using feature data instead (Fig. 4B)
 
 ```{r}
 d.booted <- d %>% 
@@ -163,20 +131,16 @@ Note: Random interaction doesn't converge for full model (less variance in these
 ```{r}
 contrasts(d$context) <- contr.treatment(2, base = 2)
 contrasts(d$occlusions) <- contr.treatment(2, base = 2)
-summary(glmer(colorMention ~ occlusions * context + (1 + occlusions | gameid), 
-              family = 'binomial', data = d))
+summary(glmer(colorMention ~ occlusions * context + (1 + occlusions + context | gameid), 
+              family = 'binomial', data = d, control = glmerControl(optimizer = 'bobyqa')))
 ```
 
 ```{r}
-summary(glmer(textureMention ~ occlusions * context + (1 + occlusions | gameid), 
-              family = 'binomial', data = d))
+summary(glmer(textureMention ~ occlusions * context + (1 + occlusions + context | gameid), 
+              family = 'binomial', data = d, control = glmerControl(optimizer = 'bobyqa')))
 ```
 
-## Listener analyses
-
 ### How common are errors?
-
-Quite rare...
 
 ```{r}
 ## Errors by condition
@@ -194,32 +158,9 @@ exp1_clicks %>%
   tally()
 ```
 
-## Additional checks & exploratory analyses:
+# Additional checks & exploratory analyses:
 
-### check if speaker results differ across what the distractor is?
-
-```{r}
-bdaInput %>%
-  group_by(distractorType, hidden) %>%
-  tidyboot_mean(column = numFeatures) %>%
-  ggplot(aes(x = distractorType, y = mean, fill = hidden)) +
-    geom_bar(stat = 'identity', position = dodge) +
-    geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower), position = dodge, width = 0)
-```
-
-### check if speaker results depend on number of distractors?
-
-```{r}
-bdaInput %>%
-  mutate(numVisible= numDistractors - numObjsOccluded) %>%
-  group_by(numVisible, hidden) %>%
-  tidyboot_mean(column = numFeatures) %>%
-  ggplot(aes(x = numVisible, y = mean, fill = hidden)) +
-    geom_bar(stat = 'identity', position = dodge) +
-    geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower), position = dodge, width = 0)
-```
-
-### Visualize basic (no-hidden) pragmatic effect
+### Visualize basic (occlusion-absent) pragmatic effect for each participant
 
 ```{r}
 basic.d <- d %>%
@@ -239,25 +180,7 @@ ggplot(basic.d, aes(x = far, y = close)) +
     theme(aspect.ratio = 1, text = element_text(size=20))
 ```
 
-Aggregated to difference scores:
-
-```{r}
-tidyboot_mean(basic.d %>%ungroup(), column = diff) %>%
-  ggplot(aes(x = 'close - far', y = empirical_stat)) +
-      geom_bar(stat ='identity', width = 0.25) +
-      geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower), width = 0) +
-      theme_few()+
-      geom_hline(yintercept = 0) +
-      #geom_vline(xintercept = 0) +
-      ylim(-1,1) +
-      # xlim(-4,4) +
-      ylab('# words used') +
-    theme(aspect.ratio = 1, text = element_text(size=20))
-
-t.test(basic.d$diff)
-```
-
-### Visualize individual differences in num features
+## Visualize individual differences in num words
 
 Some people used exactly the same number of words on every trial...
 
@@ -268,9 +191,7 @@ hidden.d <- d %>%
   spread(hidden, m) %>%
   mutate(diff = yes- no,
          ratio = log(yes/no)) 
-```
 
-```{r}
 ggplot(hidden.d, aes(x = no, y = yes)) +
     geom_density_2d() +
     facet_wrap(~ context) +
@@ -285,47 +206,18 @@ ggplot(hidden.d, aes(x = no, y = yes)) +
 
 ```
 
-Histogram
+## Visualize histogram of number of features mentioned in each condition
 
 ```{r}
-hidden.d %>% 
-  #filter(!(gameid %in% all_the_things_ers)) %>% 
-  group_by(context) %>% 
-  mutate(m = mean(diff)) %>%
-  ggplot(aes(x = diff)) +
-      geom_histogram(binwidth = 0.33) +
-      theme_bw() +
-      geom_vline(xintercept = 0, linetype = 2) +
-      geom_vline(aes(xintercept = m), color = 'red') +
-      facet_wrap(~ context) +
-      # ylim(1,12) +
-      xlim(-3,3) +
-      theme(aspect.ratio = 1)
+d %>%
+  mutate(hidden = fct_recode(hidden, occlusion_present = 'yes', occlusion_absent = 'no')) %>%
+  ggplot(aes(x = numFeatures)) +
+    geom_histogram(binwidth = 1) +
+    facet_grid(context ~ hidden) +
+    theme_few()
 ```
 
-```{r}
-hidden.d %>%
-  group_by(context) %>%
-  summarize(m = mean(diff), se = sd(diff)/sqrt(length(diff))) %>%
-  ggplot(aes(x = context, y = m)) +
-    geom_bar(stat = 'identity', width = 0.25) +
-    geom_errorbar(aes(ymin = m - se, ymax = m + se), width = 0) +
-    theme_few() +
-    geom_hline(yintercept = 0) +
-    ylim(-3, 3) +
-    theme(aspect.ratio = 1, text = element_text(size=20))  +
-    ylab('# words (occlusions - no occlusions)')
-  
-```
-
-Histograms of number of features mentioned in each condition
-
-```{r}
-ggplot(d, aes(x = numFeatures)) +
-  geom_histogram(binwidth = 1) +
-  facet_grid(context ~ occlusions) +
-  theme_few()
-```
+## Look at different combinations of color & texture mentions
 
 ```{r}
 d %>% group_by(context, occlusions) %>% 
