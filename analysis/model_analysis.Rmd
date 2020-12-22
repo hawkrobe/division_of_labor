@@ -59,10 +59,10 @@ RR %>%
   filter(changePoint)
 ```
 
-### Dynamics simulations (Appendix B)
+# Dynamics simulations (Appendix B)
 
 ```{r}
-dynamics <- read_csv('../modeling/output/new_dynamicsOutput.csv')
+dynamics <- read_csv('../modeling/output/dynamicsOutput.csv')
 
 dynamics %>%
   group_by(numDatapoints) %>%
@@ -79,37 +79,132 @@ dynamics %>%
 ggsave('dynamics.pdf', width = 2, height = 2, units = 'in')
 ```
 
-### Model comparison
+# Model comparison (Appendix C)
+
+Define some helper functions
+
+```{r}
+library(coda)
+
+estimate_mode <- function(s) {
+  d <- density(s)
+  return(d$x[which.max(d$y)])
+}
+HPDhi<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","upper"])
+}
+HPDlo<- function(s){
+  m <- HPDinterval(mcmc(s))
+  return(m["var1","lower"])
+}
+```
+
+## Pre-process & write out empirical data from Exp 1 in format for bayesian data analysis
+
+Need to add column annotating whether the critical distractor in close trials differs from target in texture, color, or both...
+
+```{r}
+exp1_subjInfo <- read_csv('../data/experiment1/planned_sample/turk/subjInfo.csv')
+d_annotated <- read_csv('../data/experiment1/planned_sample/chatMessage/messages_with_annotations.csv') 
+incompleteIDs <- d_annotated %>% 
+  group_by(gameid) %>%  
+  filter(length(unique(trialNum)) != 24) %>%
+  pull(gameid) %>%
+  unique()
+
+confused <- exp1_subjInfo %>% 
+  filter(understandsInstructions != 'yes') %>%
+  pull(gameid) %>%
+  unique()
+
+nonNative <- exp1_subjInfo %>% 
+  filter(nativeEnglish != 'yes') %>%
+  pull(gameid) %>%
+  unique()
+
+# Some speakers violated instructions by relying fully on location in grid 
+location_abusers <- c('8219-bb7861c1-43f4-480c-906b-8441c583c0ab', 
+                      '7726-3d4a266f-e56d-4afb-9a79-b40deb690a76', 
+                      '5684-f09de856-4d64-423c-b342-b30e7325eb0e', 
+                      '7600-346d56b5-bd76-406f-befb-6b47e07d5916')
+
+# Some speakers violated instructions by playing this weird taboo game where they gave riddles 
+tabooers <- c('2929-d218f724-b45e-416b-af44-5cab5658bad9', #(opposite of white... primary color...)
+              '7600-346d56b5-bd76-406f-befb-6b47e07d5916', # MERRY GO ROUND
+              '3462-7e95c955-4087-4eb9-bbc8-05338f9a5e4b') # CAN YOU SEE???
+
+badGames <- c(incompleteIDs, nonNative, location_abusers, confused, tabooers)
+
+d <- d_annotated %>%
+  mutate(numFeatures = colorMention + shapeMention + textureMention) %>%
+  filter(!(gameid %in% badGames)) %>%
+  mutate(occlusions = as.factor(occlusions),
+        context = as.factor(context))
+
+exp1_clicks <- read_tsv('../data/experiment1/planned_sample/clickedObj/clickedObj.csv') %>%
+  mutate(correct = ifelse(correct == 'true', 1, 0)) %>%
+  filter(!(gameid %in% badGames))
+
+exp1_clicks %>% 
+  mutate(names = substr(names,2,nchar(names)-1)) %>%
+  separate(names, sep = ',', into = c('item1','item2','item3', 'item4', 'item5'),
+           extra = "merge", fill = "left") %>%
+  select(-item5) %>%
+  gather(distractorNum, distractorName, item1:item4) %>%
+  separate(intendedName, into = c('targetTexture', 'targetColor', 'targetShape')) %>%
+  filter(!is.na(distractorName)) %>%
+  separate(distractorName, into = c('distractorTexture', 'distractorColor', 'distractorShape')) %>%
+  filter(distractorShape == targetShape) %>%
+  mutate(textureMatch = distractorTexture == targetTexture) %>%
+  mutate(colorMatch = distractorColor == targetColor) %>%
+  mutate(distractorType = ifelse(textureMatch, 'texture_shape', ifelse(colorMatch, 'color_shape', 'shape_only'))) %>%
+  select(gameid, trialNum, distractorType) %>%
+  right_join(exp1_clicks) %>%
+  mutate(distractorType = ifelse(is.na(distractorType), 'diff_shape', distractorType)) %>%
+  right_join(d) %>% 
+  select(gameid, trialNum, distractorType, context, hidden, 
+         numDistractors, colorMention, shapeMention, textureMention) %>%
+  write_csv('../modeling/input/bdaInput.csv')
+```
+
+Get empirical data in a format to make predictives plots against model output
+
+```{r}
+empiricalData <- d %>% 
+  group_by(context, hidden) %>% 
+  tidyboot_mean(column = numFeatures) %>%
+  ungroup() %>%
+  mutate(context = as.character(context)) %>%
+  mutate(source = as.character('empirical data')) %>% 
+  select(-empirical_stat, -n)
+```
+
+## Generate Predictives (Fig. C1)
 
 Look at pattern of predictives for each model, compared to empirical number of features mentioned
 
 ```{r}
 dodge <- position_dodge(width=0.9)
 
-rbind(
-    read.csv('../modeling/bdaOutput/occlusionSensitivityPredictives.csv') %>% mutate(source = 'occlusion-sensitive model'),
-    read.csv('../modeling/bdaOutput/egocentricPredictives.csv') %>% mutate(source = 'occlusion-blind model')
-    ) %>%
+read.csv('../modeling/output/occlusionSensitiveBDAPredictives.csv') %>% 
+  mutate(source = 'occlusion-sensitive model') %>%
+  rbind(read.csv('../modeling/output/egocentricBDAPredictives.csv') %>% 
+        mutate(source = 'occlusion-blind model')) %>%
+  rbind(read.csv('../modeling/output/mixtureBDAPredictives.csv') %>% 
+        mutate(source = 'mixture model')) %>%
   mutate(i = row_number()) %>%
   gather(condition, value, -prob, -MCMCprob, -source, -i) %>%
   separate(condition, sep = '_', into = c('context', 'numDistractors', 'distractorType', 'hidden')) %>%
-  #filter(context == 'far' & source == 'occlusion-blind model' & hidden == 'visible') %>%
   group_by(context, hidden, source) %>%
   summarize(mean = mean(value),
             ci_lower = round(HPDlo(value), 3),
             ci_upper = round(HPDhi(value), 3)) %>%
-  #separate(condition, into = c('context', 'hidden')) %>%
   ungroup() %>%
   mutate(hidden = ifelse(hidden == 'hidden', 'yes', 'no')) %>%
-  rbind(d %>% 
-          group_by(context, hidden) %>% 
-          tidyboot_mean(column = numFeatures) %>%
-          ungroup() %>%
-          mutate(context = as.character(context)) %>%
-          mutate(source = as.character('empirical data')) %>% 
-          select(-empirical_stat, -n)) %>%
-  mutate(source = factor(source, levels = c('empirical data', 'occlusion-sensitive model', 
-                                            'occlusion-blind model'))) %>%
+  rbind(empiricalData) %>%
+  mutate(source = fct_relevel(source, 'empirical data', 'mixture', 
+                              'occlusion-sensitive model', 'occlusion-blind model')) %>%
   ggplot(aes(x = context, fill = hidden, y = mean)) +
     geom_bar(stat = 'identity', position = dodge) +
     geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower), position = dodge, width = 0) +
@@ -119,9 +214,92 @@ rbind(
     theme(aspect.ratio = .57, text = element_text(size=20)) +
     ylab('mean # features produced') 
 
-ggsave('../../pragmatics_and_perspective_taking_tex/cognition_format/figures/predictives.pdf',
-       useDingbats=FALSE )
+ggsave('predictives.pdf', useDingbats=FALSE )
 ```
+## Determine best-fitting model (Table C1)
+
+```{r}
+read_csv('../modeling/output/AIS.txt', col_names = c('model', 'marginal_likelihood')) %>%
+  group_by(model) %>%
+  summarize(marginal = mean(marginal_likelihood))
+```
+
+Check out inferred mixture weight in mixture model
+
+```{r}
+read.csv('../modeling/output/mixtureBDAParams.csv') %>%
+  gather(parameter, value, alpha:shapeCost) %>%
+  group_by(parameter) %>%
+  summarize(mode = estimate_mode(value),
+            md_lo = HPDlo(value),
+            md_hi = HPDhi(value))
+```
+
+Get MAP estimates and CIs from param posteriors for best-fitting occlusion-sensitive model with $w_S = 1$. 
+
+```{r}
+params <- read.csv('../modeling/output/occlusionSensitiveBDAParams.csv') 
+
+params %>%
+  gather(parameter, value, alpha:shapeCost) %>%
+  group_by(parameter) %>%
+  summarize(mode = estimate_mode(value),
+            md_lo = HPDlo(value),
+            md_hi = HPDhi(value))
+```
+
+Visualize param posteriors (Fig. S2)
+
+```{r}
+numSamples = 5000
+params.samples <- params[rep(row.names(params), exp(params$prob)*numSamples), ] %>%
+    gather(parameter, value, alpha:shapeCost)
+
+answererParamPosteriors = ggplot(params.samples, aes(x=log(value)))+
+    geom_density(aes(y=..density..),
+                 data =subset(params.samples, parameter == "alpha" ),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "textureCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "colorCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    geom_density(aes(y=..density..),
+                 data=subset(params.samples, parameter == "shapeCost"),
+                 adjust = 3, alpha=.2, fill="#FF6666")+
+    xlab('log parameter value')+
+    ggtitle("Parameter Posteriors (5000 samples)") +
+    facet_grid(parameter ~ . , scales = 'free') +
+    theme_few()
+
+answererParamPosteriors
+ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/paramPosterior.pdf',
+       height = 4, width = 6)
+```
+
+# Bonus (unused) analyses
+
+Look at big grid of RR analysis for other alpha/uttCost params (need to run with 'coarse-grid' first)
+
+```{r}
+bind_rows(
+  read_csv('../modeling/output/new_RRlistenerOutput.csv') %>% mutate(src = 'listener'),
+  read_csv('../modeling/output/new_RRspeakerOutput.csv') %>% mutate(src ='speaker')
+) %>%
+  filter(perspectiveCost < 0.55) %>%
+  filter(alpha == 2.12) %>%
+  group_by(src, perspectiveCost, alpha, uttCost) %>%
+  ggplot(aes(x = weighting, y = prob, 
+             color = perspectiveCost, group = perspectiveCost)) +
+  geom_line() +
+  facet_grid(uttCost ~ src) +
+  theme_few() +
+  xlim(0,1) +
+  theme(aspect.ratio = 1)
+```
+
+Look at scatter plots of predictives.
 
 ```{r}
 to.plot <- rbind(read.csv('../modeling/bdaOutput/occlusionSensitivityPredictives.csv') %>% mutate(source = 'occlusion-sensitive model'),
@@ -184,84 +362,4 @@ ggplot(to.plot, aes(x = ego_mean, y = emp_mean)) +
 ggsave('../../pragmatics_of_perspective_taking_tex/cognition_format/figures/egocentricScatter.pdf',
        useDingbats=FALSE)
        #height = 5, width = 9)
-```
-
-Get MAP estimates and CIs from param posteriors for occlusion-sensitive model
-
-```{r}
-params <- read.csv('../modeling/bdaOutput/occlusionSensitivityParams.csv') 
-
-params %>%
-  gather(parameter, value, alpha:shapeCost) %>%
-  group_by(parameter) %>%
-  summarize(mode = estimate_mode(value),
-            md_lo = HPDlo(value),
-            md_hi = HPDhi(value))
-```
-
-Visualize param posteriors
-
-```{r}
-numSamples = 5000
-params.samples <- params[rep(row.names(params), exp(params$prob)*numSamples), ] %>%
-    gather(parameter, value, alpha:shapeCost)
-
-answererParamPosteriors = ggplot(params.samples, aes(x=log(value)))+
-    geom_density(aes(y=..density..),
-                 data =subset(params.samples, parameter == "alpha" ),
-                 adjust = 3, alpha=.2, fill="#FF6666")+
-    geom_density(aes(y=..density..),
-                 data=subset(params.samples, parameter == "textureCost"),
-                 adjust = 3, alpha=.2, fill="#FF6666")+
-    geom_density(aes(y=..density..),
-                 data=subset(params.samples, parameter == "colorCost"),
-                 adjust = 3, alpha=.2, fill="#FF6666")+
-    geom_density(aes(y=..density..),
-                 data=subset(params.samples, parameter == "shapeCost"),
-                 adjust = 3, alpha=.2, fill="#FF6666")+
-    xlab('log parameter value')+
-    ggtitle("Parameter Posteriors (5000 samples)") +
-    facet_grid(parameter ~ . , scales = 'free') +
-    theme_few()
-
-answererParamPosteriors
-ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/paramPosterior.pdf',
-       height = 4, width = 6)
-```
-
-log-likelihood plot
-
-```{r}
-rbind(read.csv('../modeling/bdaOutput/occlusionSensitivityParams.csv'),
-      read.csv('../modeling/bdaOutput/egocentricParams.csv')) %>%
-  group_by(source) %>%
-  summarize(maxLikelihood = max(logLikelihood)) %>%
-  ggplot(aes(x = source, y = maxLikelihood)) +
-    geom_bar(stat = 'identity') +
-    theme_few() +
-    coord_cartesian(ylim=c(0, -4000)) +
-    theme(aspect.ratio = 3)
-
-ggsave("../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/likelihoodPlot.pdf",
-       height = 6, width = 2)
-```
-
-
-Look at big grid of 
-
-```{r}
-bind_rows(
-  read_csv('../modeling/output/new_RRlistenerOutput.csv') %>% mutate(src = 'listener'),
-  read_csv('../modeling/output/new_RRspeakerOutput.csv') %>% mutate(src ='speaker')
-) %>%
-  filter(perspectiveCost < 0.55) %>%
-  filter(alpha == 2.12) %>%
-  group_by(src, perspectiveCost, alpha, uttCost) %>%
-  ggplot(aes(x = weighting, y = prob, 
-             color = perspectiveCost, group = perspectiveCost)) +
-  geom_line() +
-  facet_grid(uttCost ~ src) +
-  theme_few() +
-  xlim(0,1) +
-  theme(aspect.ratio = 1)
 ```
