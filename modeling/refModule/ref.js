@@ -83,33 +83,12 @@ function readCSV(filename){
 };
 
 function writeCSV(jsonCSV, filename){
-  fs.writeFileSync(filename, babyparse.unparse(jsonCSV) + '\n');
+  fs.writeFileSync(filename, babyparse.unparse([jsonCSV]) + '\n');
 }
 
 function appendCSV(jsonCSV, filename){
   fs.appendFileSync(filename, babyparse.unparse(jsonCSV) + '\n');
 }
-
-var writeERP = function(erp, labels, filename, fixed) {
-  var data = _.filter(erp.support().map(
-   function(v) {
-     var prob = Math.exp(erp.score(v));
-     if (prob > 0.0){
-      if(v.slice(-1) === ".")
-        out = butLast(v);
-      else if (v.slice(-1) === "?")
-        out = butLast(v).split("Is")[1].toLowerCase();
-      else 
-        out = v
-      return labels.concat([out, String(prob.toFixed(fixed))]);
-
-    } else {
-      return [];
-    }
-  }
-  ), function(v) {return v.length > 0;});
-  appendCSV(data, filename);
-};
 
 var supportWriter = function(s, p, handle) {
   var sLst = _.toPairs(s);
@@ -200,7 +179,7 @@ var getRelativeLength = function(params, label) {
 module.exports = {
   possibleUtts, possibleObjects,
   constructLexicon, powerset, getSubset, 
-  paramsErpWriter, predictivesErpWriter, writeERP, writeCSV,
+  paramsErpWriter, predictivesErpWriter, writeCSV,
   readCSV, locParse, getRelativeLength,
   getRelativeLogFrequency, getTypSubset
 };
