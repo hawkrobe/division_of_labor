@@ -10,7 +10,6 @@ var possibleObjects = Categorical({
     'othertexture_color_shape', 'texture_othercolor_shape', 'texture_color_othershape',
     'othertexture_othercolor_shape', 'texture_othercolor_othershape', 'othertexture_color_othershape',
   ]
-  //ps: [1/64, 27/64, 3/64, 3/64, 3/64, 9/64, 9/64, 9/64]
 });
 
 // speaker can mention any combination of the 3 feature dimensions
@@ -40,15 +39,6 @@ var contexts = {
   'texture_shape' : ['texture_color_shape', 'texture_othercolor_shape']
 };
 
-var getTrueUtterances = function(context) {
-  var trueUtts = filter(function(utt) {
-    return _.some(map(function(obj) {
-      return meaning(utt, obj);
-    }, context));
-  }, possibleUtterances.support());
-  return Categorical({vs: trueUtts});
-};
-
 // utterance is true if object has all of the mentioned features
 var meaning = function(utt, object) {
   var descriptors = utt.split('_');
@@ -58,6 +48,15 @@ var meaning = function(utt, object) {
   }, descriptors));
   return matches;
 };
+
+var getTrueUtterances = cache(function(context) {
+  var trueUtts = filter(function(utt) {
+    return _.some(map(function(obj) {
+      return meaning(utt, obj);
+    }, context));
+  }, possibleUtterances.support());
+  return Categorical({vs: trueUtts});
+});
 
 // cost of producing utterance is sum of costs of the component words
 var uttCost = function(utt, params) {
@@ -73,13 +72,13 @@ var getSpeakerView = function(listenerContext) {
   return remove(hiddenObj, listenerContext);
 };
 
-
+// L0 interprets utterance literally using fixed mixture of perspectives
 var L0 = cache(function(utt, context, weighting) {
   return Infer({method: 'enumerate'}, function() {
     var perspective = flip(weighting) ? 'other' : 'own';
     var partnerContext = perspective == 'own' ? context : getSpeakerView(context);
     var object = uniformDraw(partnerContext);
-    condition(meaning(utt, object));
+    factor(meaning(utt, object) ? Math.log(1) : Math.log(0.01));
     return object;
   });
 });
@@ -89,20 +88,15 @@ var L0 = cache(function(utt, context, weighting) {
 var S1 = cache(function(target, context, ownWeighting, params) {
   return Infer({method: 'enumerate'}, function() {
     var utt = sample(getTrueUtterances(context));    
-    var partnerWeighting = sample(possibleWeightings);
-
-    // Weight proportional to utility
-    var perspective = flip(ownWeighting) ? 'other' : 'own';
-    
-    var informativity = (
-      perspective == 'own' ? L0(utt, context, 0).score(target) :
-        expectation(possibleObjects, function(obj) {
-          var possibleListenerView = params.hidden =='yes' ? context.concat(obj + '_private') : context;
-          return (L0(utt, possibleListenerView, partnerWeighting).score(target));
-        })
-    );
-
-    factor(params.alpha * (informativity - uttCost(utt,params)));
+    var combinedUtility = expectation(possibleWeightings, function(partnerWeighting) {
+      var egocentricUtility = L0(utt, context, 0).score(target) - uttCost(utt,params);
+      var asymmetricUtility = expectation(possibleObjects, function(obj) {
+        var possibleListenerView = params.hidden =='yes' ? context.concat(obj + '_private') : context;
+        return L0(utt, possibleListenerView, partnerWeighting).score(target) - uttCost(utt,params);
+      });
+      return ownWeighting * asymmetricUtility + (1 - ownWeighting) * egocentricUtility;
+    });
+    factor(params.alpha * combinedUtility);
     return utt;
   });
 });
@@ -156,9 +150,10 @@ var bda = function() {
 };
 
 if(argv.AIS == "true"){
-  console.log([argv.model, AIS(bda, {samples: 1, steps: 10000})].join(','));
+  refModule.writeCSV({model: argv.model, value: AIS(bda, {samples: 1, steps: 10000})},
+                     './output/AIS_' + argv.model + argv.chainNum + '.csv');
 } else {
-  var outputERP = Infer({method: 'MCMC', samples: 1000, burn: 1000, lag: 1, model: bda, verbose: true});
+  var outputERP = Infer({method: 'MCMC', samples: 1000, burn: 1000, lag: 5, model: bda, verbose: true});
   refModule.paramsErpWriter(outputERP, "./output/" + argv.model + "BDA");
 
   var predictives = function() {
