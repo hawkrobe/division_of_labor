@@ -40,5 +40,7 @@ webppl BDA.wppl --require ./refModule/ -- --model mixture
 To get marginal likelihoods via annealed importance sampling, run
 
 ```
-parallel --bar --colsep ',' "sh ./run_AIS.sh {1}" :::: input/BF_grid.csv > "output/AIS.txt"
+parallel --bar --colsep ',' "sh ./run_AIS.sh {1} {2}" :::: input/BF_grid.csv
 ```
+
+Note: for each of the parallelized command-line processes, the results must be collated into a single CSV before being read into the RNotebook for analyses. 
