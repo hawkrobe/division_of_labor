@@ -219,9 +219,9 @@ ggsave('predictives.pdf', useDingbats=FALSE )
 ## Determine best-fitting model (Table C1)
 
 ```{r}
-read_csv('../modeling/output/AIS.txt', col_names = c('model', 'marginal_likelihood')) %>%
+read_csv('../modeling/output/AIS2.csv') %>%
   group_by(model) %>%
-  summarize(marginal = mean(marginal_likelihood))
+  summarize(marginal = mean(value))
 ```
 
 Check out inferred mixture weight in mixture model
@@ -241,6 +241,7 @@ Get MAP estimates and CIs from param posteriors for best-fitting occlusion-sensi
 params <- read.csv('../modeling/output/occlusionSensitiveBDAParams.csv') 
 
 params %>%
+  select(-ownWeighting) %>%
   gather(parameter, value, alpha:shapeCost) %>%
   group_by(parameter) %>%
   summarize(mode = estimate_mode(value),
@@ -251,11 +252,12 @@ params %>%
 Visualize param posteriors (Fig. S2)
 
 ```{r}
-numSamples = 5000
-params.samples <- params[rep(row.names(params), exp(params$prob)*numSamples), ] %>%
+numSamples = 1000
+params.samples <- params[rep(row.names(params), exp(params$prob)*numSamples), ] %>%   
+  select(-ownWeighting) %>%
     gather(parameter, value, alpha:shapeCost)
 
-answererParamPosteriors = ggplot(params.samples, aes(x=log(value)))+
+paramPosteriors = ggplot(params.samples, aes(x=log(value)))+
     geom_density(aes(y=..density..),
                  data =subset(params.samples, parameter == "alpha" ),
                  adjust = 3, alpha=.2, fill="#FF6666")+
@@ -268,13 +270,13 @@ answererParamPosteriors = ggplot(params.samples, aes(x=log(value)))+
     geom_density(aes(y=..density..),
                  data=subset(params.samples, parameter == "shapeCost"),
                  adjust = 3, alpha=.2, fill="#FF6666")+
-    xlab('log parameter value')+
-    ggtitle("Parameter Posteriors (5000 samples)") +
+    xlab('log parameter value') +
+    ggtitle("Parameter Posteriors (1000 samples)") +
     facet_grid(parameter ~ . , scales = 'free') +
     theme_few()
 
-answererParamPosteriors
-ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/appendix/figures/paramPosterior.pdf',
+paramPosteriors
+ggsave('paramPosterior.pdf',
        height = 4, width = 6)
 ```
 
