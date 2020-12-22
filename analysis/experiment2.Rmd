@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Experiment 2"
 output: html_notebook
 ---
 
@@ -12,28 +12,8 @@ library(ggthemes)
 library(lme4)
 library(lmerTest)
 library(tidyboot)
-library(coda)
-#library(irr)
+library(irr)
 
-estimate_mode <- function(s) {
-  d <- density(s)
-  return(d$x[which.max(d$y)])
-}
-HPDhi<- function(s){
-  m <- HPDinterval(mcmc(s))
-  return(m["var1","upper"])
-}
-HPDlo<- function(s){
-  m <- HPDinterval(mcmc(s))
-  return(m["var1","lower"])
-}
-```
-
-# Experiment 2
-
-## Import messages and drops
-
-```{r}
 exp2_messages <- read_csv('../data/experiment2/chatMessage/messagesFromMongo.csv') %>%
   mutate(critical = ifelse(critical == 'True', 1, 0)) %>%
   rename(messageTime = serverTime) %>%
@@ -45,7 +25,8 @@ exp2_messages <- read_csv('../data/experiment2/chatMessage/messagesFromMongo.csv
   mutate(numRawWords = str_count(text, "\\S+")) 
 
 ## Have to correct for post-hoc attemptNum and instructionNum bugs (got reset for next trial prematurely)
-## Also, remove trials where multi-drop bug happened (i.e. where clicking multiple times triggered multiple instruction resetting)
+## Also, remove trials where a multi-drop bug happened
+## (i.e. where clicking multiple times triggered multiple instruction resetting)
 exp2_drops <- read_csv('../data/experiment2/drop/dropsFromMongo.csv') %>%
   mutate(correct = correct == 'correct',
          instructionNum = ifelse(correct == FALSE, instructionNum + 1, instructionNum)) %>%
@@ -80,12 +61,14 @@ And make exclusions based on subj info exit survey
 
 ```{r}
 exp2_subjInfo <- read_csv('../data/experiment2/turk/subjInfo.csv')
-incompleteIDs <- unique((exp2_messages %>% 
-                           group_by(gameid, trialNum, instructionNum) %>% 
-                           summarize(nn = n()) %>% 
-                           group_by(gameid) %>% 
-                           tally() %>% 
-                           filter(n != 32))$gameid)
+incompleteIDs <- exp2_messages %>% 
+  group_by(gameid, trialNum, instructionNum) %>% 
+  summarize(nn = n()) %>% 
+  group_by(gameid) %>% 
+  tally() %>% 
+  filter(n != 32) %>%
+  pull(gameid) %>%
+  unique()
 
 confused <- unique((exp2_subjInfo %>% filter(understandsInstructions != 'yes'))$gameid)
 nonNative <- unique((exp2_subjInfo %>% filter(nativeEnglish != 'yes'))$gameid)
@@ -101,12 +84,9 @@ taboo <- c('4241-cda4a373-ffd7-41e3-ae60-82b9d377a455')
 onlyLocation <- c('3222-f68d2df5-8977-4ff2-9ee9-c60f8ddb61f1', '9457-4189cc9b-a82b-4db9-828d-bf90d1987aee')
 exp2_badGames <- c(incompleteIDs, nonNative, nonCriticalMistakes, confused, taboo, onlyLocation, unique(buggyTrials$gameid))
 exp2_d <- exp2_drops %>% 
-  left_join(exp2_messages) %>% #, by = c('gameid', 'trialNum', 'instructionNum', 'trialType', 
-                      #         'targetObject', 'critical', 'condition', 'attemptNum')) %>%
+  left_join(exp2_messages) %>%
   filter(!(gameid %in% exp2_badGames))
-
 ```
-
 
 ## Descriptive stats
 
@@ -142,7 +122,7 @@ exp2_d %>%
 
 ## Listener Analyses
 
-### Visualize & compare error rates across conditions
+### Visualize & compare error rates across conditions (Fig. 6A)
 
 ```{r}
 critTrials <- exp2_d %>% 
@@ -164,9 +144,7 @@ critTrials %>%
     scale_fill_colorblind()+
     ggtitle('critical errors')
   
-
-ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/figures/criticalErrors.pdf',
-       height = 5, width = 2.5)
+ggsave('criticalErrors.pdf', height = 5, width = 2.5)
 ```
 
 ```{r}
@@ -186,12 +164,12 @@ errorTable <- critTrials %>%
             totalNumErrors = sum(numErrors),
             totalPossible = sum(numPossible))
 
-errorTable
 prop.test(errorTable$totalNumErrors, errorTable$totalPossible)
 ```
 
 ```{r}
-summary(glmer(correct ~ condition + (1|gameid) + (1+condition | objectSet), family = 'binomial', 
+summary(glmer(correct ~ condition + (1|gameid) + (1+condition | objectSet), 
+              family = 'binomial', 
               data = critTrials))
 ```
 
@@ -221,7 +199,7 @@ d.onDistractor.correctOnly <- exp2_d %>%
 dodge <- position_dodge(width=0.9)
 d.onDistractor.correctOnly %>%
   group_by(condition, trialType) %>%
-  tidyboot_mean(column = totalAmtTimeOnDistractor) %>%
+  tidyboot_mean(column = totalAmtTimeOnDistractor, na.rm = T) %>%
   mutate(trial = ifelse(trialType == 'base', 'baseline', 'experimental')) %>%
   ggplot(aes(x = condition, y=empirical_stat, fill = condition, group = trial)) +
     geom_bar(aes(alpha = trial), stat = 'identity', position = dodge) +
@@ -233,21 +211,25 @@ d.onDistractor.correctOnly %>%
     guides(fill='none') +
     theme(aspect.ratio = 2, legend.position = 'top')
     
-ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/figures/hoverOverDistractor.pdf', height = 5, width = 2.5)
+ggsave('hoverOverDistractor.pdf', height = 5, width = 2.5)
 ```
 
 This is our pregistered DV
 
 ```{r}
-summary(lmer(totalAmtTimeOnDistractor ~ trialType * condition + (1 +trialType|gameid) + (1 +trialType|objectSet), 
-             data = d.onDistractor.correctOnly))
+lmer(totalAmtTimeOnDistractor ~ trialType * condition + 
+                                (1  |gameid) + (1 +trialType * condition | objectSet), 
+     data = d.onDistractor.correctOnly,
+     control = lmerControl(optimizer = 'bobyqa')) %>%
+  summary()
 ```
 
 This is the 'cleaned up' proportionality measure we report in the footnote
 
 ```{r}
-summary(glmer(hovered ~ trialType * condition + (1|gameid) + (1+trialType|objectSet), 
-              data = d.onDistractor.correctOnly, family = 'binomial'))
+summary(glmer(hovered ~ trialType * condition + (1|gameid) + (1+trialType * condition|objectSet), 
+              data = d.onDistractor.correctOnly, family = 'binomial',
+              control = glmerControl(optimizer = 'bobyqa')))
 ```
 
 ## Adaptation over time
@@ -258,30 +240,51 @@ critTrials %>%
   mutate(trialNum = row_number()) %>% 
   group_by(trialNum) %>% 
   summarize(prop = sum(correct)/length(correct)) %>%
-  #mutate(error = ifelse(correct == 0, 'error', 'no error')) %>%
   ggplot(aes(x= trialNum, y = prop)) +
     geom_point() +
-    geom_smooth(method = 'lm')
+    geom_smooth(method = 'lm') +
+    labs(x = 'trial #', y = '% correct') +
+    theme_few()
 ```
-
 Mixed-effects model on raw error probability
 
 ```{r}
-summary(glmer(correct ~ trialNum * condition + (1 | gameid), family = 'binomial',
-             data = critTrials %>%   
-                    group_by(gameid) %>%
-                    mutate(trialNum = row_number())))
+regular <- critTrials %>%   
+  group_by(gameid) %>%
+  mutate(trialNum = row_number()) %>%
+  glmer(correct ~ trialNum + condition + (1 | gameid), 
+        family = 'binomial',
+        data = .,
+        control = glmerControl(optimizer = 'bobyqa')) 
+
+summary(regular)
+```
+
+Check whether interaction is supported.
+
+```{r}
+interaction <- critTrials %>%   
+  group_by(gameid) %>%
+  mutate(trialNum = row_number()) %>%
+  glmer(correct ~ trialNum * condition + (1 | gameid), family = 'binomial',
+        data = .,
+        control = glmerControl(optimizer = 'bobyqa')) 
+summary(interaction)
+anova(regular, interaction)
 ```
 
 Supplementary Bayesian version with more complete random effects
 
 ```{r}
 library(brms)
-summary(brm(correct ~ trialNum * condition  + (1 + trialNum | gameid), family = 'bernoulli', 
-              data = critTrials %>%   
-                    group_by(gameid) %>%
-                    mutate(trialNum = row_number(),
-                           lastRoundIncorrect = 1-lag(correct)), control = list(adapt_delta = .95)))
+critTrials %>%   
+  group_by(gameid) %>%
+  mutate(trialNum = row_number(),
+         lastRoundIncorrect = 1-lag(correct)) %>%
+  brm(correct ~ trialNum + condition  + (1 + trialNum | gameid) + (1 + trialNum | objectSet) , 
+      family = 'bernoulli', 
+      data = ., iter = 4000, control = list(adapt_delta = .98)) %>%
+  summary()
 ```
 
 ## Speaker analyses
@@ -315,7 +318,7 @@ standardized_refs %>%
 
 ### Unscripted speakers had significantly more words in their referring expressions across items... 
 
-note: if you just bootstrap CIs for each item, it's significant for 6 of 8...
+note: not rigorous, but if you examine individual bootstraped CIs for each item, it's significant for 6 of 8...
 
 ```{r}
 unscripted_refs <- read_csv('../data/experiment2/refExpressions.csv')
@@ -355,8 +358,11 @@ inf_diffs <- inf_ratings %>%
   mutate(diff = target - distractor) %>%
   ungroup()
 
-wideRatings <- inf_diffs %>% select(label, diff, workerid) %>% spread(workerid, diff)
-icc(wideRatings[,-c(1)],
+wideRatings <- inf_diffs %>% 
+  select(label, diff, workerid) %>% 
+  spread(workerid, diff)
+
+irr::icc(wideRatings[,-c(1)],
     model = "twoway", type = "agreement")
 
 inf_diffs_collapsed <- inf_diffs %>%
@@ -437,7 +443,7 @@ boot_stats = data.frame(
   summarize(m = mean(value),
             ci_upper = sort(value)[length(value) * 0.025],
             ci_lower = sort(value)[length(value) * 0.975]) %>%
-  separate(condition, into = c('condition', 'referent'), by = '_') 
+  separate(condition, into = c('condition', 'referent'), sep = '_') 
 
 dodge <- position_dodge(width=0.9)
 ggplot(boot_stats, aes(x = condition, y = m, fill = condition, alpha = referent)) +
@@ -450,8 +456,7 @@ ggplot(boot_stats, aes(x = condition, y = m, fill = condition, alpha = referent)
   ylab('utterance informativity ratings') +
   theme(aspect.ratio = 2, legend.position = 'top')
 
-ggsave('../../pragmatics_of_perspective_taking_tex/pnas_format/figures/informativity.pdf',
-       height = 5, width = 2.5)
+ggsave('informativity.pdf', height = 5, width = 2.5)
 ```
 
 ### How well does informativity correlate with error?
@@ -538,9 +543,7 @@ cat('r = ', mean(boot_correlation),
     ', ', sort(boot_correlation)[length(boot_correlation) * 0.975],']')
 ```
 
-## Exploratory & checks
-
-### Error heterogeneity across items (in supplemental)
+### Error heterogeneity across items (Fig. S3)
 
 ```{r}
 error_diffs <- critTrials %>% 
@@ -583,6 +586,95 @@ unscriptedErrors <- errorRates %>%
   select(errors, nonerrors)
 chisq.test(as.matrix(rbind(unscriptedErrors$errors, unscriptedErrors$nonerrors)), simulate.p.value = T)
 ```
+
+# Supplemental experiment analyses (Appendix D)
+
+```{r}
+library(tidyverse)
+d.supp.clicks <- read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv')
+paste0(c('we have', length(unique(d.supp.clicks$gameid)), 'participants.'), collapse = ' ')
+
+# Following same criterion as above, we remove participants who make more than one
+# non-critical error (ignoring errors in the initial practice block)
+exclusions <- d.supp.clicks %>%
+  rowwise() %>%
+  filter(occlusions != 'critical'  || (occlusions == 'critical' && !clickedHiddenObj && !correct)) %>%
+  filter(trialNum > 4) %>%
+  group_by(gameid) %>%
+  summarize(nonCriticalErrors = sum(!correct)) %>%
+  filter(nonCriticalErrors > 1) %>%
+  pull(gameid)
+```
+
+```{r}
+d.supp.clicks %>%
+  filter(!(gameid %in% exclusions)) %>%
+  group_by(gameid) %>%
+  filter(occlusions == 'critical') %>%
+  mutate(instance = row_number()) %>%
+  filter(clickedHiddenObj) %>%
+  group_by(gameid) %>%
+  summarize(errorInstances = paste0(instance, collapse =  ',')) #%>%
+  # group_by(instance) %>%
+  # summarize(clickedHidden =sum(clickedHiddenObj))
+```
+
+```{r}
+critical_only <- read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv') %>%
+  filter(occlusions =='critical') %>%
+  rowwise() %>%
+  mutate(shape_of_target = strsplit(intendedName, '_')[[1]][3]) %>%
+  rowwise() %>%
+  mutate(i = grep(shape_of_target, strsplit(names, ',')[[1]])[1]) %>%
+  mutate(criticalDistractorX = as.numeric(gsub('\\[', '', strsplit(gridXs, ',')[[1]][i])),
+         criticalDistractorY = as.numeric(gsub('\\[', '', strsplit(gridYs, ',')[[1]][i])),
+         criticalDistractorLeftBorder = 600 * (criticalDistractorX - 1),
+         criticalDistractorRightBorder = 600 * (criticalDistractorX),
+         criticalDistractorTopBorder = 600 * (criticalDistractorY-1),
+         criticalDistractorBottomBorder = 600 * (criticalDistractorY)) %>%
+  select(gameid, trialNum, criticalDistractorLeftBorder,criticalDistractorRightBorder,criticalDistractorTopBorder,criticalDistractorBottomBorder)
+```
+
+```{r}
+distractor <- left_join(
+  read_tsv('../data/supplemental_exp/updateMouse/mouse.csv'),
+   read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv'),
+  by = c('trialNum', 'gameid')) %>%
+  filter(occlusions == 'critical') %>%
+  left_join(critical_only, by = c('gameid', 'trialNum')) %>%
+  rowwise() %>%
+  mutate(overDistractor = (
+    rawMouseX < criticalDistractorRightBorder && 
+    rawMouseX > criticalDistractorLeftBorder &&
+    rawMouseY < criticalDistractorBottomBorder && 
+    rawMouseY > criticalDistractorTopBorder
+    )
+  ) %>%
+  filter(!(gameid %in% exclusions)) %>%
+  group_by(gameid, trialNum) %>% 
+  summarize(hovered = sum(overDistractor) > 0) %>%
+  mutate(instance = row_number()) 
+
+distractor %>%
+  group_by(instance) %>%
+  tidyboot_mean(sum(hovered) / length(hovered)) %>%
+  ggplot(aes(x = instance, y = empirical_stat)) +
+    geom_point() +
+    #geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
+    geom_smooth(method = 'lm', formula = y ~ poly(x, 2), se = F) +
+    theme_bw() +
+    ylab('% trials hovering over distractor') +
+    xlab('occurrence in trial sequence') +
+    theme(aspect.ratio = 1/2)
+
+ggsave('hoverReduction.pdf')
+library(lme4)
+library(tidyboot)
+library(lmerTest)
+summary(lmer(hovered ~ instance + (1 | gameid), data = distractor))
+```
+
+# Additional miscellaneous analyses not in paper
 
 ### Is there relationship between errors on critical and errors on filler?
 
@@ -686,100 +778,4 @@ ggplot(d.mouse, aes(x = trialType, y = empirical_stat, fill = metric)) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), position = dodge, width = 0) +
   facet_wrap(~ condition) +
   theme_few()
-```
-
-## TO-DO
-
-1. Subject-level analyses of informativity: could be a mixture of 'lazy' egocentric speakers and 'attentive' audience-sensitive speakers? 
-2. Sometimes the additional information is in movement instruction (i.e. "one square left toward a curtain" or "one square up below the comb")
-3. Change in informativity over time (are people already being informative on first round? are people 'learning' to be more informative over course of expt? or getting less informative because tired of task?)
-4. Order effects (i.e. are people more likely to use a modifier when they had to on the previous round?)
-5. Are people more informative when there are more objects? 
-
-
-# Supplemental experiment
-
-```{r}
-library(tidyverse)
-d.supp.clicks <- read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv')
-paste0(c('we have', length(unique(d.supp.clicks$gameid)), 'participants.'), collapse = ' ')
-
-# Following same criterion as above, we remove participants who make more than one
-# non-critical error (ignoring errors in the initial practice block)
-exclusions <- d.supp.clicks %>%
-  rowwise() %>%
-  filter(occlusions != 'critical'  || (occlusions == 'critical' && !clickedHiddenObj && !correct)) %>%
-  filter(trialNum > 4) %>%
-  group_by(gameid) %>%
-  summarize(nonCriticalErrors = sum(!correct)) %>%
-  filter(nonCriticalErrors > 1) %>%
-  pull(gameid)
-```
-
-```{r}
-d.supp.clicks %>%
-  filter(!(gameid %in% exclusions)) %>%
-  group_by(gameid) %>%
-  filter(occlusions == 'critical') %>%
-  mutate(instance = row_number()) %>%
-  filter(clickedHiddenObj) %>%
-  group_by(gameid) %>%
-  summarize(errorInstances = paste0(instance, collapse =  ',')) #%>%
-  # group_by(instance) %>%
-  # summarize(clickedHidden =sum(clickedHiddenObj))
-```
-
-```{r}
-critical_only <- read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv') %>%
-  filter(occlusions =='critical') %>%
-  rowwise() %>%
-  mutate(shape_of_target = strsplit(intendedName, '_')[[1]][3]) %>%
-  rowwise() %>%
-  mutate(i = grep(shape_of_target, strsplit(names, ',')[[1]])[1]) %>%
-  mutate(criticalDistractorX = as.numeric(gsub('\\[', '', strsplit(gridXs, ',')[[1]][i])),
-         criticalDistractorY = as.numeric(gsub('\\[', '', strsplit(gridYs, ',')[[1]][i])),
-         criticalDistractorLeftBorder = 600 * (criticalDistractorX - 1),
-         criticalDistractorRightBorder = 600 * (criticalDistractorX),
-         criticalDistractorTopBorder = 600 * (criticalDistractorY-1),
-         criticalDistractorBottomBorder = 600 * (criticalDistractorY)) %>%
-  select(gameid, trialNum, criticalDistractorLeftBorder,criticalDistractorRightBorder,criticalDistractorTopBorder,criticalDistractorBottomBorder)
-```
-
-```{r}
-distractor <- left_join(
-  read_tsv('../data/supplemental_exp/updateMouse/mouse.csv'),
-   read_tsv('../data/supplemental_exp/clickedObj/allClicks.csv'),
-  by = c('trialNum', 'gameid')) %>%
-  filter(occlusions == 'critical') %>%
-  left_join(critical_only, by = c('gameid', 'trialNum')) %>%
-  rowwise() %>%
-  mutate(overDistractor = (
-    rawMouseX < criticalDistractorRightBorder && 
-    rawMouseX > criticalDistractorLeftBorder &&
-    rawMouseY < criticalDistractorBottomBorder && 
-    rawMouseY > criticalDistractorTopBorder
-    )
-  ) %>%
-  filter(!(gameid %in% exclusions)) %>%
-  group_by(gameid, trialNum) %>% 
-  summarize(hovered = sum(overDistractor) > 0) %>%
-  mutate(instance = row_number()) 
-
-distractor %>%
-  group_by(instance) %>%
-  tidyboot_mean(sum(hovered) / length(hovered)) %>%
-  ggplot(aes(x = instance, y = empirical_stat)) +
-    geom_point() +
-    #geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0) +
-    geom_smooth(method = 'lm', formula = y ~ poly(x, 2), se = F) +
-    theme_bw() +
-    ylab('% trials hovering over distractor') +
-    xlab('occurrence in trial sequence') +
-    theme(aspect.ratio = 1/2)
-
-ggsave('hoverReduction.pdf')
-library(lme4)
-library(tidyboot)
-library(lmerTest)
-summary(lmer(hovered ~ instance + (1 | gameid), data = distractor))
 ```
