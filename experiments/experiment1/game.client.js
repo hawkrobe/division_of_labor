@@ -16,58 +16,32 @@ var dragging;
 var waiting;
 
 var client_onserverupdate_received = function(data){
-  globalGame.my_role = data.trialInfo.roles[globalGame.my_id];
+    globalGame.my_role = data.trialInfo.roles[globalGame.my_id];
 
-  // Update client versions of variables with data received from
-  // server_send_update function in game.core.js
-  //data refers to server information
-  if(data.players) {
-    _.map(_.zip(data.players, globalGame.players),function(z){
-      z[1].id = z[0].id;
-    });
-  }
-  
-  if (globalGame.roundNum != data.roundNum) {
-    globalGame.objects = data.trialInfo.currStim.objects;
-    globalGame.occlusions = data.trialInfo.currStim.occlusions;
-  };
-
-  globalGame.game_started = data.gs;
-  globalGame.players_threshold = data.pt;
-  globalGame.player_count = data.pc;
-  globalGame.roundNum = data.roundNum;
-  globalGame.roundStartTime = new Date();
-  globalGame.allObjects = data.allObjects;
-  
-  if(!_.has(globalGame, 'data')) {
-    globalGame.data = data.dataObj;
-  }
-
-  // Get rid of "waiting" screen if there are multiple players
-  if(data.players.length > 1) {
-    $('#messages').empty();
-
-    // reset labels
-    // Update w/ role (can only move stuff if agent)
-    $('#roleLabel').empty().append("You are the " + globalGame.my_role + '.');
-
-    if(globalGame.my_role === globalGame.playerRoleNames.role1) {
-      globalGame.viewport.removeEventListener("click", mouseClickListener, false);
-      $('#instructs')
-	.empty()
-	.append("<p>Send a message through the chat box</p>" +
-		"<p>to tell the listener which object is the target.</p>");
-    } else if(globalGame.my_role === globalGame.playerRoleNames.role2) {
-      $('#instructs')
-	.empty()
-	.append("<p>After you see the speaker's message,</p>" +
-		"<p>click the object they are telling you about.</p>");
+    // Update client versions of variables with data received from
+    // server_send_update function in game.core.js
+    //data refers to server information
+    if(data.players) {
+	_.map(_.zip(data.players, globalGame.players),function(z){
+	    z[1].id = z[0].id;
+	});
     }
-  }
+
+    if(data.trialInfo.currStim) {
+	globalGame.objects = data.trialInfo.currStim.objects;
+	globalGame.occlusions = data.trialInfo.currStim.occlusions;
+    }
     
-  // Draw all this new stuff
-  console.log(data.trialInfo);
-  drawScreen(globalGame, globalGame.get_player(globalGame.my_id));
+    globalGame.game_started = data.gs;
+    globalGame.players_threshold = data.pt;
+    globalGame.player_count = data.pc;
+    globalGame.roundNum = data.roundNum;
+    globalGame.roundStartTime = new Date();
+    globalGame.allObjects = data.allObjects;
+    
+    if(!_.has(globalGame, 'data')) {
+	globalGame.data = data.dataObj;
+    }
 };
 
 var handleMousemove = function(event) {
@@ -190,57 +164,58 @@ var customSetup = function(game) {
   // Set up new round on client's browsers after submit round button is pressed.
   // This means clear the chatboxes, update round number, and update score on screen
   game.socket.on('newRoundUpdate', function(data){
-    $('#messages').empty();
-    if(game.roundNum + 2 > game.numRounds) {
-      $('#roundnumber').empty();
-      $('#instructs').empty()
-        .append("Round\n" + (game.roundNum + 1) + "/" + game.numRounds);
-    } else {
-      $('#feedback').empty();
-      $('#roundnumber').empty()
-        .append("Round\n" + (game.roundNum + 2) + "/" + game.numRounds);
-    }
-    // For mouse-tracking, matcher must wait until director sends message
-    if(globalGame.my_role == globalGame.playerRoleNames.role2) {
-      var msg = 'Waiting for your partner to send a message...';
-      globalGame.get_player(globalGame.my_id).message = msg;
-      globalGame.paused = true;
-    } else {
-      $("#chatbox").removeAttr("disabled");
-      $('#chatbox').focus();
-      globalGame.get_player(globalGame.my_id).message = "";
-    }
-    //drawScreen(globalGame, globalGame.get_player(globalGame.my_id));      
+      $('#messages').empty();
+      if(game.roundNum + 2 > game.numRounds) {
+	  $('#roundnumber').empty();
+	  $('#instructs').empty()
+              .append("Round\n" + (game.roundNum + 1) + "/" + game.numRounds);
+      } else {
+	  $('#feedback').empty();
+	  $('#roundnumber').empty()
+              .append("Round\n" + (game.roundNum + 2) + "/" + game.numRounds);
+      }
+
+      // reset labels
+      // Update w/ role (can only move stuff if agent)
+      $('#roleLabel').empty().append("You are the " + globalGame.my_role + '.');
+
+      if(globalGame.my_role === globalGame.playerRoleNames.role1) {
+	  globalGame.viewport.removeEventListener("click", mouseClickListener, false);
+	  $('#instructs')
+	      .empty()
+	      .append("<p>Send a message through the chat box</p>" +
+		      "<p>to tell the listener which object is the target.</p>");
+      } else if(globalGame.my_role === globalGame.playerRoleNames.role2) {
+	  $('#instructs')
+	      .empty()
+	      .append("<p>After you see the speaker's message,</p>" +
+		      "<p>click the object they are telling you about.</p>");
+      }
+
+      // For mouse-tracking, matcher must wait until director sends message
+      if(globalGame.my_role == globalGame.playerRoleNames.role2) {
+	  var msg = 'Waiting for your partner to send a message...';
+	  globalGame.get_player(globalGame.my_id).message = msg;
+	  globalGame.paused = true;
+	  globalGame.viewport.addEventListener("click", mouseClickListener, false);
+      } else {
+	  $("#chatbox").removeAttr("disabled");
+	  $('#chatbox').focus();
+	  globalGame.get_player(globalGame.my_id).message = "";
+      }
+      drawScreen(globalGame, globalGame.get_player(globalGame.my_id));      
   });
 };
 
 var client_onjoingame = function(num_players, role) {
-  // set role locally
-  globalGame.my_role = role;
-  globalGame.get_player(globalGame.my_id).role = globalGame.my_role;
-  _.map(_.range(num_players - 1), function(i){
-    globalGame.players.unshift({id: null, player: new game_player(globalGame)});
-  });
-  $("#chatbox").attr("disabled", "disabled");
-  if(globalGame.my_role == globalGame.playerRoleNames.role2) {
-    globalGame.viewport.addEventListener("click", mouseClickListener, false);
-    globalGame.viewport.addEventListener('mousemove', throttle(handleMousemove, 10));
-  }
-  if(num_players == 1) {
-    this.timeoutID = setTimeout(function() {
-      if(_.size(this.urlParams) == 4) {
-        this.submitted = true;
-        window.opener.turk.submit(this.data, true);
-        window.close();
-      } else {
-        console.log("would have submitted the following :");
-        console.log(this.data);
-      }
-    }, 1000 * 60 * 15);
+    // set role locally
+    _.map(_.range(num_players - 1), function(i){
+	globalGame.players.unshift({id: null, player: new game_player(globalGame)});
+    });
+    $("#chatbox").attr("disabled", "disabled");
     globalGame.get_player(globalGame.my_id).message = (
-      'Waiting for another player to connect... Please do not refresh the page!'
+	'Waiting for another player to connect... Please do not refresh the page!'
     );
-  }
 };
 
 /*

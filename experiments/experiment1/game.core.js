@@ -143,9 +143,6 @@ game_core.prototype.newRound = function(delay) {
     if(localThis.roundNum == localThis.numRounds - 1) {
       _.forEach(players, p => p.player.instance.disconnect());
     } else {
-      // Tell players
-      _.forEach(players, p => p.player.instance.emit( 'newRoundUpdate'));
-
       // Otherwise, get the preset list of tangrams for the new round
       localThis.roundNum += 1;
 
@@ -155,7 +152,12 @@ game_core.prototype.newRound = function(delay) {
 	roles: _.zipObject(_.map(localThis.players, p =>p.id),
 			   _.values(localThis.trialInfo.roles))
       };
-      localThis.server_send_update();
+	localThis.server_send_update();
+
+	// Tell players
+      _.forEach(players, p => p.player.instance.emit( 'newRoundUpdate'));
+
+
     }
   }, delay);
 };

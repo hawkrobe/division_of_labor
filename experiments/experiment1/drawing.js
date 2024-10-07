@@ -81,11 +81,10 @@ var drawScreen = function(game, player) {
              game.world.width*4/5,
              170);
   } else {
-    drawGrid(game);
-    // Preload occlusion images then draw objects afterward
-    drawOcclusions(game);
-    if (game.my_role === game.playerRoleNames.role1) {
-      highlightCell(game, '#FF8300', x => x.targetStatus == 'target');
+      drawGrid(game);
+      drawOcclusions(game);
+      if (game.my_role === game.playerRoleNames.role1) {
+	  highlightCell(game, '#FF8300', x => x.targetStatus == 'target');
     }
   }
 };
@@ -106,7 +105,7 @@ var drawClickPoint = function(game) {
 
 var drawOcclusions = function(game) {
   if(_.isEmpty(game.occlusions)) {
-    drawObjects(game);
+      drawObjects(game);
   } else {
     game.occlusionImages = [];
     game.occlusionCount = game.occlusions.length;
